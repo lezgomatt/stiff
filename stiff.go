@@ -1,7 +1,10 @@
 package main
 
 import (
+	"crypto/sha512"
+	"encoding/base64"
 	"errors"
+	"fmt"
 	"io"
 	"log"
 	"mime"
@@ -42,7 +45,9 @@ func main() {
 	log.Fatal(s.Serve(ln))
 }
 
-type FileDetails struct{}
+type FileDetails struct {
+	ETag string
+}
 
 type FileServer struct {
 	fileMap map[string]FileDetails
@@ -60,8 +65,13 @@ func NewFileServer(dir string) (*FileServer, error) {
 			return nil
 		}
 
+		eTag, err := computeETag(path)
+		if err != nil {
+			return err
+		}
+
 		p := strings.TrimPrefix(path, PublicDir)
-		fileMap[p] = FileDetails{}
+		fileMap[p] = FileDetails{ETag: eTag}
 
 		return nil
 	})
@@ -100,13 +110,19 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p = filepath.FromSlash(url)
 	}
 
-	if _, found := s.fileMap[p]; !found {
-		if _, found := s.fileMap[p+".html"]; found {
-			p = p + ".html"
-		} else {
+	var fileDetails FileDetails
+
+	if fd, found := s.fileMap[p]; !found {
+		fd, found := s.fileMap[p+".html"]
+		if !found {
 			s.send404(w, r)
 			return
 		}
+
+		p = p + ".html"
+		fileDetails = fd
+	} else {
+		fileDetails = fd
 	}
 
 	if p == indexPath && url != "/" {
@@ -133,6 +149,10 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if fileInfo.IsDir() {
 		s.send404(w, r)
 		return
+	}
+
+	if fileDetails.ETag != "" {
+		w.Header().Set("ETag", fileDetails.ETag)
 	}
 
 	http.ServeContent(w, r, filename, time.Time{}, file)
@@ -191,4 +211,21 @@ func (s *FileServer) sendHTML(w http.ResponseWriter, r *http.Request, htmlPath s
 	io.CopyN(w, file, size)
 
 	return nil
+}
+
+func computeETag(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	h := sha512.New512_256()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+
+	checksum := base64.URLEncoding.EncodeToString(h.Sum(nil))
+
+	return fmt.Sprintf(`W/"%s"`, checksum[:20]), nil
 }
