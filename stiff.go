@@ -18,6 +18,8 @@ import (
 const DefaultPort = "1717"
 const PublicDir = "public"
 
+var indexPath = filepath.FromSlash("/index.html")
+
 func main() {
 	fileServer, err := NewFileServer(PublicDir)
 	if err != nil {
@@ -84,17 +86,31 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if strings.HasSuffix(r.URL.Path, ".html") {
+		http.Redirect(w, r, strings.TrimSuffix(r.URL.Path, ".html"), http.StatusMovedPermanently)
+		return
+	}
+
 	var p string
 	url := path.Clean(r.URL.Path)
 
 	if url == "/" {
-		p = filepath.FromSlash("/index.html")
+		p = indexPath
 	} else {
 		p = filepath.FromSlash(url)
 	}
 
 	if _, found := s.fileMap[p]; !found {
-		s.send404(w, r)
+		if _, found := s.fileMap[p+".html"]; found {
+			p = p + ".html"
+		} else {
+			s.send404(w, r)
+			return
+		}
+	}
+
+	if p == indexPath && url != "/" {
+		http.Redirect(w, r, "/", http.StatusMovedPermanently)
 		return
 	}
 
