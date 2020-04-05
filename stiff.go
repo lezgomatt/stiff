@@ -67,7 +67,15 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	p := filepath.FromSlash(path.Clean(r.URL.Path))
+	var p string
+	url := path.Clean(r.URL.Path)
+
+	if url == "/" {
+		p = filepath.FromSlash("/index.html")
+	} else {
+		p = filepath.FromSlash(url)
+	}
+
 	if _, found := s.fileMap[p]; !found {
 		s.Serve404(w, r)
 		return
