@@ -98,6 +98,7 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		s.handleError(w, r, err)
 		return
 	}
+	defer file.Close()
 
 	fileInfo, err := file.Stat()
 	if err != nil {
@@ -146,6 +147,7 @@ func (s *FileServer) sendHTML(w http.ResponseWriter, r *http.Request, htmlPath s
 	if err != nil {
 		return err
 	}
+	defer file.Close()
 
 	fileInfo, err := file.Stat()
 	if err != nil {
