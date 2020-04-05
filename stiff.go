@@ -5,6 +5,7 @@ import (
 	"io"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -23,13 +24,20 @@ func main() {
 		log.Fatalln(err)
 	}
 
-	s := http.Server{
-		Addr:    ":" + DefaultPort,
-		Handler: fileServer,
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = DefaultPort
 	}
 
-	log.Printf("Listening on port %s...\n", DefaultPort)
-	log.Fatal(s.ListenAndServe())
+	s := http.Server{Handler: fileServer}
+
+	ln, err := net.Listen("tcp", ":"+port)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	log.Printf("Listening on port %s...\n", port)
+	log.Fatal(s.Serve(ln))
 }
 
 type FileDetails struct{}
