@@ -71,6 +71,11 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
+	if strings.HasSuffix(r.URL.Path, "/") && r.URL.Path != "/" {
+		http.Redirect(w, r, strings.TrimRight(r.URL.Path, "/"), http.StatusMovedPermanently)
+		return
+	}
+
 	var p string
 	url := path.Clean(r.URL.Path)
 
