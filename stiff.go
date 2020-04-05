@@ -1,11 +1,15 @@
 package main
 
 import (
+	"errors"
+	"io"
 	"log"
+	"mime"
 	"net/http"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -63,7 +67,7 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if err := recover(); err != nil {
 			log.Println(err)
-			s.Serve500(w, r)
+			s.send500(w, r)
 		}
 	}()
 
@@ -77,7 +81,7 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if _, found := s.fileMap[p]; !found {
-		s.Serve404(w, r)
+		s.send404(w, r)
 		return
 	}
 
@@ -86,37 +90,74 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	file, err := os.Open(targetPath)
 	if err != nil {
-		s.ServeError(w, r, err)
+		s.handleError(w, r, err)
 		return
 	}
 
 	fileInfo, err := file.Stat()
 	if err != nil {
-		s.ServeError(w, r, err)
+		s.handleError(w, r, err)
 		return
 	}
 
 	if fileInfo.IsDir() {
-		s.Serve404(w, r)
+		s.send404(w, r)
 		return
 	}
 
 	http.ServeContent(w, r, filename, time.Time{}, file)
 }
 
-func (s *FileServer) ServeError(w http.ResponseWriter, r *http.Request, err error) {
+func (s *FileServer) handleError(w http.ResponseWriter, r *http.Request, err error) {
 	if os.IsNotExist(err) {
-		s.Serve404(w, r)
+		s.send404(w, r)
 	} else {
 		log.Println(err)
-		s.Serve500(w, r)
+		s.send500(w, r)
 	}
 }
 
-func (s *FileServer) Serve404(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "404 page not found", http.StatusNotFound)
+func (s *FileServer) send404(w http.ResponseWriter, r *http.Request) {
+	err := s.sendHTML(w, r, "/404.html", http.StatusNotFound)
+	if err != nil {
+		http.Error(w, "404 page not found", http.StatusNotFound)
+	}
 }
 
-func (s *FileServer) Serve500(w http.ResponseWriter, r *http.Request) {
-	http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
+func (s *FileServer) send500(w http.ResponseWriter, r *http.Request) {
+	err := s.sendHTML(w, r, "/500.html", http.StatusInternalServerError)
+	if err != nil {
+		http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
+func (s *FileServer) sendHTML(w http.ResponseWriter, r *http.Request, htmlPath string, statusCode int) error {
+	p := filepath.FromSlash(htmlPath)
+	if _, found := s.fileMap[p]; !found {
+		return errors.New("fileserver: file not found")
+	}
+
+	file, err := os.Open(filepath.Join(PublicDir, p))
+	if err != nil {
+		return err
+	}
+
+	fileInfo, err := file.Stat()
+	if err != nil {
+		return err
+	}
+
+	if fileInfo.IsDir() {
+		return errors.New("fileserver: expected an HTML file, but found a directory instead")
+	}
+
+	size := fileInfo.Size()
+
+	w.Header().Set("Content-Type", mime.TypeByExtension(".html"))
+	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
+	w.WriteHeader(statusCode)
+
+	io.CopyN(w, file, size)
+
+	return nil
 }
