@@ -49,7 +49,9 @@ func main() {
 }
 
 type FileDetails struct {
-	ETag string
+	ETag      string
+	HasBrotli bool
+	HasGZip   bool
 }
 
 type FileServer struct {
@@ -74,7 +76,21 @@ func NewFileServer(dir string) (*FileServer, error) {
 		}
 
 		p := strings.TrimPrefix(path, PublicDir)
-		fileMap[p] = FileDetails{ETag: eTag}
+		if strings.HasSuffix(p, ".br") {
+			p = strings.TrimSuffix(p, ".br")
+			if fd, ok := fileMap[p]; ok {
+				fd.HasBrotli = true
+				fileMap[p] = fd
+			}
+		} else if strings.HasSuffix(path, ".gz") {
+			p = strings.TrimSuffix(p, ".gz")
+			if fd, ok := fileMap[p]; ok {
+				fd.HasGZip = true
+				fileMap[p] = fd
+			}
+		} else {
+			fileMap[p] = FileDetails{ETag: eTag}
+		}
 
 		return nil
 	})
@@ -122,7 +138,7 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		p = p + ".html"
+		p += ".html"
 		fileDetails = fd
 	} else {
 		fileDetails = fd
@@ -134,7 +150,19 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	targetPath := filepath.Join(PublicDir, p)
-	filename := filepath.Base(targetPath)
+	rangeReq := r.Header.Get("Range")
+	if fileDetails.HasBrotli || fileDetails.HasGZip {
+		w.Header().Add("Vary", "Accept-Encoding")
+
+		ae := parseAcceptEncoding(r.Header.Get("Accept-Encoding"))
+		if ae.Brotli && rangeReq == "" && fileDetails.HasBrotli {
+			w.Header().Set("Content-Encoding", "br")
+			targetPath += ".br"
+		} else if ae.GZip && rangeReq == "" && fileDetails.HasGZip {
+			w.Header().Set("Content-Encoding", "gzip")
+			targetPath += ".gz"
+		}
+	}
 
 	file, err := os.Open(targetPath)
 	if err != nil {
@@ -154,11 +182,16 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if rangeReq == "" {
+		// http.ServeContent skips Content-Length when Content-Encoding is set
+		w.Header().Set("Content-Length", strconv.FormatInt(fileInfo.Size(), 10))
+	}
+
 	if fileDetails.ETag != "" {
 		w.Header().Set("ETag", fileDetails.ETag)
 	}
 
-	http.ServeContent(w, r, filename, time.Time{}, file)
+	http.ServeContent(w, r, p, time.Time{}, file)
 }
 
 func (s *FileServer) handleError(w http.ResponseWriter, r *http.Request, err error) {
@@ -171,6 +204,8 @@ func (s *FileServer) handleError(w http.ResponseWriter, r *http.Request, err err
 }
 
 func (s *FileServer) send404(w http.ResponseWriter, r *http.Request) {
+	w.Header().Del("Content-Encoding")
+
 	err := s.sendHTML(w, r, "/404.html", http.StatusNotFound)
 	if err != nil {
 		http.Error(w, "404 page not found", http.StatusNotFound)
@@ -178,6 +213,8 @@ func (s *FileServer) send404(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *FileServer) send500(w http.ResponseWriter, r *http.Request) {
+	w.Header().Del("Content-Encoding")
+
 	err := s.sendHTML(w, r, "/500.html", http.StatusInternalServerError)
 	if err != nil {
 		http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
@@ -230,5 +267,34 @@ func computeETag(path string) (string, error) {
 
 	checksum := base64.URLEncoding.EncodeToString(h.Sum(nil))
 
+	// use weak etags to allow the same hash for compressed versions
 	return fmt.Sprintf(`W/"%s"`, checksum[:20]), nil
+}
+
+type AcceptEncoding struct {
+	Brotli bool
+	GZip   bool
+}
+
+func parseAcceptEncoding(headerText string) AcceptEncoding {
+	var ae AcceptEncoding
+
+	for _, part := range strings.Split(headerText, ",") {
+		var enc string
+		if sc := strings.Index(part, ";"); sc != -1 {
+			// ignore quality values, we always prioritize brotli over gzip
+			enc = strings.TrimSpace(part[:sc])
+		} else {
+			enc = strings.TrimSpace(part)
+		}
+
+		switch enc {
+		case "br":
+			ae.Brotli = true
+		case "gzip":
+			ae.GZip = true
+		}
+	}
+
+	return ae
 }
