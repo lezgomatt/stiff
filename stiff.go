@@ -67,6 +67,8 @@ func main() {
 
 type ServerConfig struct {
 	Headers map[string]string `json:"headers"`
+	ETag    *bool             `json:"etag"`
+	LastMod *bool             `json:"lastmod"`
 
 	Routes map[string]RouteConfig `json:"routes"`
 
@@ -75,9 +77,13 @@ type ServerConfig struct {
 
 type RouteConfig struct {
 	Headers map[string]string `json:"headers"`
+	ETag    *bool             `json:"etag"`
+	LastMod *bool             `json:"lastmod"`
 }
 
-var defaultConfig = RouteConfig{}
+var yes = true
+var no = false
+var defaultConfig = RouteConfig{ETag: &yes, LastMod: &no}
 
 func NewRouteConfig(sc *ServerConfig, rc *RouteConfig) RouteConfig {
 	nc := defaultConfig
@@ -91,12 +97,28 @@ func NewRouteConfig(sc *ServerConfig, rc *RouteConfig) RouteConfig {
 		nc.Headers[k] = v
 	}
 
+	if sc.ETag != nil {
+		nc.ETag = sc.ETag
+	}
+
+	if sc.LastMod != nil {
+		nc.LastMod = sc.LastMod
+	}
+
 	if rc == nil {
 		return nc
 	}
 
 	for k, v := range rc.Headers {
 		nc.Headers[k] = v
+	}
+
+	if rc.ETag != nil {
+		nc.ETag = rc.ETag
+	}
+
+	if rc.LastMod != nil {
+		nc.LastMod = rc.LastMod
 	}
 
 	return nc
@@ -111,7 +133,7 @@ func NewRouteMap(sc *ServerConfig) (RouteMap, error) {
 		return rm, nil
 	}
 
-	var routes []string
+	routes := make([]string, 0, len(sc.Routes))
 	for r, _ := range sc.Routes {
 		if !strings.HasPrefix(r, "/") {
 			return nil, fmt.Errorf("stiff.json: invalid route %q, missing leading slash", r)
@@ -194,7 +216,7 @@ func NewFileServer(config *ServerConfig, dir string) (*FileServer, error) {
 		}
 	}
 
-	fm, err := buildFileMap(config, dir, mm)
+	fm, err := buildFileMap(config, dir, rm, mm)
 	if err != nil {
 		return nil, err
 	}
@@ -202,7 +224,7 @@ func NewFileServer(config *ServerConfig, dir string) (*FileServer, error) {
 	return &FileServer{routeMap: rm, fileMap: fm}, nil
 }
 
-func buildFileMap(config *ServerConfig, dir string, mm MimeMap) (map[string]FileDetails, error) {
+func buildFileMap(config *ServerConfig, dir string, rm RouteMap, mm MimeMap) (map[string]FileDetails, error) {
 	fileMap := make(map[string]FileDetails)
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -229,9 +251,12 @@ func buildFileMap(config *ServerConfig, dir string, mm MimeMap) (map[string]File
 		} else {
 			mType := mm.FindType(filepath.Ext(p))
 
-			eTag, err := computeETag(path, mType)
-			if err != nil {
-				return err
+			var eTag string
+			if *rm.GetConfig(strings.TrimSuffix(p, ".html")).ETag {
+				eTag, err = computeETag(path, mType)
+				if err != nil {
+					return err
+				}
 			}
 
 			fileMap[p] = FileDetails{ETag: eTag, MimeType: mType}
@@ -374,7 +399,14 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("ETag", fileDetails.ETag)
 	}
 
-	http.ServeContent(w, r, p, time.Time{}, file)
+	var modTime time.Time
+	if *rc.LastMod {
+		modTime = fileInfo.ModTime()
+	} else {
+		modTime = time.Time{}
+	}
+
+	http.ServeContent(w, r, p, modTime, file)
 }
 
 func (s *FileServer) handleError(w http.ResponseWriter, r *http.Request, err error) {
