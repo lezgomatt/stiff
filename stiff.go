@@ -27,10 +27,10 @@ func main() {
 	startTime := time.Now()
 	fileServer, err := NewFileServer(PublicDir)
 	if err != nil {
-		log.Fatalln(err)
+		log.Fatal(err)
 	}
 	elapsed := time.Now().Sub(startTime)
-	log.Printf("filemap generated in %d ms\n", elapsed.Milliseconds())
+	log.Printf("filemap generated in %d ms", elapsed.Milliseconds())
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -44,7 +44,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("listening on port %s...\n", port)
+	log.Printf("listening on port %s...", port)
 	log.Fatal(s.Serve(ln))
 }
 
@@ -105,7 +105,7 @@ func NewFileServer(dir string) (*FileServer, error) {
 func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		if err := recover(); err != nil {
-			log.Println(err)
+			log.Print(err)
 			s.send500(w, r)
 		}
 	}()
@@ -198,7 +198,7 @@ func (s *FileServer) handleError(w http.ResponseWriter, r *http.Request, err err
 	if os.IsNotExist(err) {
 		s.send404(w, r)
 	} else {
-		log.Println(err)
+		log.Print(err)
 		s.send500(w, r)
 	}
 }
