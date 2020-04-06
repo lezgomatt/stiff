@@ -3,9 +3,10 @@ package main
 import (
 	"crypto/sha512"
 	"encoding/base64"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"log"
 	"mime"
 	"net"
@@ -20,12 +21,27 @@ import (
 
 const DefaultPort = "1717"
 const PublicDir = "public"
+const ConfigPath = "stiff.json"
 
 var indexPath = filepath.FromSlash("/index.html")
 
 func main() {
+	cJson, err := ioutil.ReadFile(ConfigPath)
+	if err != nil && !os.IsNotExist(err) {
+		log.Fatal(err)
+	}
+
+	var config *ServerConfig
+	if cJson != nil {
+		config = new(ServerConfig)
+		err := json.Unmarshal(cJson, config)
+		if err != nil {
+			log.Fatalf("stiff.json: %s", err.Error())
+		}
+	}
+
 	startTime := time.Now()
-	fileServer, err := NewFileServer(PublicDir)
+	fileServer, err := NewFileServer(config, PublicDir)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -48,7 +64,12 @@ func main() {
 	log.Fatal(s.Serve(ln))
 }
 
+type ServerConfig struct {
+	MimeTypes map[string]string `json:"mimetypes"`
+}
+
 type FileDetails struct {
+	MimeType  string
 	ETag      string
 	HasBrotli bool
 	HasGZip   bool
@@ -58,8 +79,27 @@ type FileServer struct {
 	fileMap map[string]FileDetails
 }
 
-func NewFileServer(dir string) (*FileServer, error) {
+func NewFileServer(config *ServerConfig, dir string) (*FileServer, error) {
+	fileMap, err := buildFileMap(config, dir)
+	if err != nil {
+		return nil, err
+	}
+
+	return &FileServer{fileMap: fileMap}, nil
+}
+
+func buildFileMap(config *ServerConfig, dir string) (map[string]FileDetails, error) {
 	fileMap := make(map[string]FileDetails)
+
+	mm := defaultMimeTypes
+	if config != nil && config.MimeTypes != nil {
+		m, err := buildMimeMap(config.MimeTypes)
+		if err != nil {
+			return nil, err
+		}
+
+		mm = m
+	}
 
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -89,7 +129,10 @@ func NewFileServer(dir string) (*FileServer, error) {
 				fileMap[p] = fd
 			}
 		} else {
-			fileMap[p] = FileDetails{ETag: eTag}
+			fileMap[p] = FileDetails{
+				ETag:     eTag,
+				MimeType: mm.findType(filepath.Ext(p)),
+			}
 		}
 
 		return nil
@@ -99,7 +142,58 @@ func NewFileServer(dir string) (*FileServer, error) {
 		return nil, err
 	}
 
-	return &FileServer{fileMap: fileMap}, nil
+	return fileMap, nil
+}
+
+type MimeMap map[string]string
+
+var defaultMimeTypes = MimeMap{
+	".css":  "text/css; charset=utf-8",
+	".htm":  "text/html; charset=utf-8",
+	".html": "text/html; charset=utf-8",
+	".js":   "text/javascript; charset=utf-8",
+	".mjs":  "text/javascript; charset=utf-8",
+	".txt":  "text/plain; charset=utf-8",
+
+	".gif":  "image/gif",
+	".jpeg": "image/jpeg",
+	".jpg":  "image/jpeg",
+	".png":  "image/png",
+	".svg":  "image/svg+xml",
+	".webp": "image/webp",
+
+	".woff":  "font/woff",
+	".woff2": "font/woff2",
+
+	".json": "application/json",
+	".pdf":  "application/pdf",
+	".xml":  "application/xml",
+	".zip":  "application/zip",
+}
+
+func buildMimeMap(configTypes MimeMap) (MimeMap, error) {
+	mm := make(MimeMap)
+	for ext, mtype := range defaultMimeTypes {
+		mm[ext] = mtype
+	}
+
+	for ext, mtype := range configTypes {
+		if !strings.HasPrefix(ext, ".") {
+			return nil, fmt.Errorf(`stiff.json: invalid extension %q, missing dot`, ext)
+		}
+
+		mm[ext] = mtype
+	}
+
+	return mm, nil
+}
+
+func (mm MimeMap) findType(ext string) string {
+	if mtype, found := mm[ext]; found {
+		return mtype
+	}
+
+	return mime.TypeByExtension(ext)
 }
 
 func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -182,6 +276,8 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Content-Type", fileDetails.MimeType)
+
 	if rangeReq == "" {
 		// http.ServeContent skips Content-Length when Content-Encoding is set
 		w.Header().Set("Content-Length", strconv.FormatInt(fileInfo.Size(), 10))
@@ -223,8 +319,9 @@ func (s *FileServer) send500(w http.ResponseWriter, r *http.Request) {
 
 func (s *FileServer) sendHTML(w http.ResponseWriter, r *http.Request, htmlPath string, statusCode int) error {
 	p := filepath.FromSlash(htmlPath)
-	if _, found := s.fileMap[p]; !found {
-		return errors.New("fileserver: file not found")
+	fd, found := s.fileMap[p]
+	if !found {
+		return fmt.Errorf("fileserver: file not found %q", htmlPath)
 	}
 
 	file, err := os.Open(filepath.Join(PublicDir, p))
@@ -239,12 +336,12 @@ func (s *FileServer) sendHTML(w http.ResponseWriter, r *http.Request, htmlPath s
 	}
 
 	if fileInfo.IsDir() {
-		return errors.New("fileserver: expected an HTML file, but found a directory instead")
+		return fmt.Errorf("fileserver: expected HTML file %q, found a directory instead", htmlPath)
 	}
 
 	size := fileInfo.Size()
 
-	w.Header().Set("Content-Type", mime.TypeByExtension(".html"))
+	w.Header().Set("Content-Type", fd.MimeType)
 	w.Header().Set("Content-Length", strconv.FormatInt(size, 10))
 	w.WriteHeader(statusCode)
 
