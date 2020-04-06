@@ -24,10 +24,13 @@ const PublicDir = "public"
 var indexPath = filepath.FromSlash("/index.html")
 
 func main() {
+	startTime := time.Now()
 	fileServer, err := NewFileServer(PublicDir)
 	if err != nil {
 		log.Fatalln(err)
 	}
+	elapsed := time.Now().Sub(startTime)
+	log.Printf("filemap generated in %d ms\n", elapsed.Milliseconds())
 
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -41,7 +44,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("Listening on port %s...\n", port)
+	log.Printf("listening on port %s...\n", port)
 	log.Fatal(s.Serve(ln))
 }
 
