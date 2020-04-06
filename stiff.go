@@ -80,7 +80,18 @@ type FileServer struct {
 }
 
 func NewFileServer(config *ServerConfig, dir string) (*FileServer, error) {
-	fileMap, err := buildFileMap(config, dir)
+	mm := NewMimeMapWithDefaults()
+	if config != nil {
+		for ext, mType := range config.MimeTypes {
+			if !strings.HasPrefix(ext, ".") {
+				return nil, fmt.Errorf(`stiff.json: invalid extension %q, missing dot`, ext)
+			}
+
+			mm[ext] = mType
+		}
+	}
+
+	fileMap, err := buildFileMap(config, dir, mm)
 	if err != nil {
 		return nil, err
 	}
@@ -88,19 +99,8 @@ func NewFileServer(config *ServerConfig, dir string) (*FileServer, error) {
 	return &FileServer{fileMap: fileMap}, nil
 }
 
-func buildFileMap(config *ServerConfig, dir string) (map[string]FileDetails, error) {
+func buildFileMap(config *ServerConfig, dir string, mm MimeMap) (map[string]FileDetails, error) {
 	fileMap := make(map[string]FileDetails)
-
-	mm := defaultMimeTypes
-	if config != nil && config.MimeTypes != nil {
-		m, err := buildMimeMap(config.MimeTypes)
-		if err != nil {
-			return nil, err
-		}
-
-		mm = m
-	}
-
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -108,11 +108,6 @@ func buildFileMap(config *ServerConfig, dir string) (map[string]FileDetails, err
 
 		if info.IsDir() {
 			return nil
-		}
-
-		eTag, err := computeETag(path)
-		if err != nil {
-			return err
 		}
 
 		p := strings.TrimPrefix(path, PublicDir)
@@ -129,10 +124,14 @@ func buildFileMap(config *ServerConfig, dir string) (map[string]FileDetails, err
 				fileMap[p] = fd
 			}
 		} else {
-			fileMap[p] = FileDetails{
-				ETag:     eTag,
-				MimeType: mm.findType(filepath.Ext(p)),
+			mType := mm.FindType(filepath.Ext(p))
+
+			eTag, err := computeETag(path, mType)
+			if err != nil {
+				return err
 			}
+
+			fileMap[p] = FileDetails{ETag: eTag, MimeType: mType}
 		}
 
 		return nil
@@ -147,50 +146,35 @@ func buildFileMap(config *ServerConfig, dir string) (map[string]FileDetails, err
 
 type MimeMap map[string]string
 
-var defaultMimeTypes = MimeMap{
-	".css":  "text/css; charset=utf-8",
-	".htm":  "text/html; charset=utf-8",
-	".html": "text/html; charset=utf-8",
-	".js":   "text/javascript; charset=utf-8",
-	".mjs":  "text/javascript; charset=utf-8",
-	".txt":  "text/plain; charset=utf-8",
+func NewMimeMapWithDefaults() MimeMap {
+	return MimeMap{
+		".css":  "text/css; charset=utf-8",
+		".htm":  "text/html; charset=utf-8",
+		".html": "text/html; charset=utf-8",
+		".js":   "text/javascript; charset=utf-8",
+		".mjs":  "text/javascript; charset=utf-8",
+		".txt":  "text/plain; charset=utf-8",
 
-	".gif":  "image/gif",
-	".jpeg": "image/jpeg",
-	".jpg":  "image/jpeg",
-	".png":  "image/png",
-	".svg":  "image/svg+xml",
-	".webp": "image/webp",
+		".gif":  "image/gif",
+		".jpeg": "image/jpeg",
+		".jpg":  "image/jpeg",
+		".png":  "image/png",
+		".svg":  "image/svg+xml",
+		".webp": "image/webp",
 
-	".woff":  "font/woff",
-	".woff2": "font/woff2",
+		".woff":  "font/woff",
+		".woff2": "font/woff2",
 
-	".json": "application/json",
-	".pdf":  "application/pdf",
-	".xml":  "application/xml",
-	".zip":  "application/zip",
+		".json": "application/json",
+		".pdf":  "application/pdf",
+		".xml":  "application/xml",
+		".zip":  "application/zip",
+	}
 }
 
-func buildMimeMap(configTypes MimeMap) (MimeMap, error) {
-	mm := make(MimeMap)
-	for ext, mtype := range defaultMimeTypes {
-		mm[ext] = mtype
-	}
-
-	for ext, mtype := range configTypes {
-		if !strings.HasPrefix(ext, ".") {
-			return nil, fmt.Errorf(`stiff.json: invalid extension %q, missing dot`, ext)
-		}
-
-		mm[ext] = mtype
-	}
-
-	return mm, nil
-}
-
-func (mm MimeMap) findType(ext string) string {
-	if mtype, found := mm[ext]; found {
-		return mtype
+func (mm MimeMap) FindType(ext string) string {
+	if mType, found := mm[ext]; found {
+		return mType
 	}
 
 	return mime.TypeByExtension(ext)
@@ -350,7 +334,7 @@ func (s *FileServer) sendHTML(w http.ResponseWriter, r *http.Request, htmlPath s
 	return nil
 }
 
-func computeETag(path string) (string, error) {
+func computeETag(path string, mType string) (string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", err
@@ -358,6 +342,7 @@ func computeETag(path string) (string, error) {
 	defer f.Close()
 
 	h := sha512.New512_256()
+	io.WriteString(h, mType)
 	if _, err := io.Copy(h, f); err != nil {
 		return "", err
 	}
