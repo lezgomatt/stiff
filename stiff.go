@@ -14,6 +14,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -65,7 +66,103 @@ func main() {
 }
 
 type ServerConfig struct {
+	Headers map[string]string `json:"headers"`
+
+	Routes map[string]RouteConfig `json:"routes"`
+
 	MimeTypes map[string]string `json:"mimetypes"`
+}
+
+type RouteConfig struct {
+	Headers map[string]string `json:"headers"`
+}
+
+var defaultConfig = RouteConfig{}
+
+func NewRouteConfig(sc *ServerConfig, rc *RouteConfig) RouteConfig {
+	nc := defaultConfig
+	nc.Headers = make(map[string]string)
+
+	if sc == nil {
+		return nc
+	}
+
+	for k, v := range sc.Headers {
+		nc.Headers[k] = v
+	}
+
+	if rc == nil {
+		return nc
+	}
+
+	for k, v := range rc.Headers {
+		nc.Headers[k] = v
+	}
+
+	return nc
+}
+
+type RouteMap []RouteRule
+
+func NewRouteMap(sc *ServerConfig) (RouteMap, error) {
+	var rm RouteMap
+
+	if sc == nil {
+		return rm, nil
+	}
+
+	var routes []string
+	for r, _ := range sc.Routes {
+		if !strings.HasPrefix(r, "/") {
+			return nil, fmt.Errorf("stiff.json: invalid route %q, missing leading slash", r)
+		}
+
+		routes = append(routes, r)
+	}
+
+	// sort in reverse so that the longer matches will go first
+	sort.Sort(sort.Reverse(sort.StringSlice(routes)))
+
+	for _, route := range routes {
+		rc := sc.Routes[route]
+		rule := RouteRule{
+			pattern:  route,
+			matchDir: strings.HasSuffix(route, "/"),
+			config:   NewRouteConfig(sc, &rc),
+		}
+
+		rm = append(rm, rule)
+	}
+
+	if _, found := sc.Routes["/"]; !found {
+		rm = append(rm, RouteRule{pattern: "/", matchDir: true, config: NewRouteConfig(sc, nil)})
+	}
+
+	return rm, nil
+}
+
+func (rm RouteMap) GetConfig(route string) RouteConfig {
+	for _, r := range rm {
+		if r.matches(route) {
+			return r.config
+		}
+	}
+
+	return defaultConfig
+}
+
+type RouteRule struct {
+	pattern  string
+	matchDir bool
+	config   RouteConfig
+}
+
+func (r RouteRule) matches(route string) bool {
+	if r.matchDir {
+		return strings.HasPrefix(route, r.pattern)
+	} else {
+		return route == r.pattern
+	}
 }
 
 type FileDetails struct {
@@ -76,10 +173,16 @@ type FileDetails struct {
 }
 
 type FileServer struct {
-	fileMap map[string]FileDetails
+	routeMap RouteMap
+	fileMap  map[string]FileDetails
 }
 
 func NewFileServer(config *ServerConfig, dir string) (*FileServer, error) {
+	rm, err := NewRouteMap(config)
+	if err != nil {
+		return nil, err
+	}
+
 	mm := NewMimeMapWithDefaults()
 	if config != nil {
 		for ext, mType := range config.MimeTypes {
@@ -91,12 +194,12 @@ func NewFileServer(config *ServerConfig, dir string) (*FileServer, error) {
 		}
 	}
 
-	fileMap, err := buildFileMap(config, dir, mm)
+	fm, err := buildFileMap(config, dir, mm)
 	if err != nil {
 		return nil, err
 	}
 
-	return &FileServer{fileMap: fileMap}, nil
+	return &FileServer{routeMap: rm, fileMap: fm}, nil
 }
 
 func buildFileMap(config *ServerConfig, dir string, mm MimeMap) (map[string]FileDetails, error) {
@@ -188,19 +291,19 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	if strings.HasSuffix(r.URL.Path, "/") && r.URL.Path != "/" {
-		http.Redirect(w, r, strings.TrimRight(r.URL.Path, "/"), http.StatusMovedPermanently)
-		return
+	url := path.Clean("/" + r.URL.Path)
+	rc := s.routeMap.GetConfig(url)
+
+	for k, v := range rc.Headers {
+		w.Header().Set(k, v)
 	}
 
-	if strings.HasSuffix(r.URL.Path, ".html") {
-		http.Redirect(w, r, strings.TrimSuffix(r.URL.Path, ".html"), http.StatusMovedPermanently)
+	if url != r.URL.Path || strings.HasSuffix(url, ".html") {
+		http.Redirect(w, r, strings.TrimSuffix(url, ".html"), http.StatusMovedPermanently)
 		return
 	}
 
 	var p string
-	url := path.Clean(r.URL.Path)
-
 	if url == "/" {
 		p = indexPath
 	} else {
@@ -285,6 +388,9 @@ func (s *FileServer) handleError(w http.ResponseWriter, r *http.Request, err err
 
 func (s *FileServer) send404(w http.ResponseWriter, r *http.Request) {
 	w.Header().Del("Content-Encoding")
+	w.Header().Del("Cache-Control")
+	w.Header().Del("ETag")
+	w.Header().Del("Last-Modified")
 
 	err := s.sendHTML(w, r, "/404.html", http.StatusNotFound)
 	if err != nil {
@@ -294,6 +400,9 @@ func (s *FileServer) send404(w http.ResponseWriter, r *http.Request) {
 
 func (s *FileServer) send500(w http.ResponseWriter, r *http.Request) {
 	w.Header().Del("Content-Encoding")
+	w.Header().Del("Cache-Control")
+	w.Header().Del("ETag")
+	w.Header().Del("Last-Modified")
 
 	err := s.sendHTML(w, r, "/500.html", http.StatusInternalServerError)
 	if err != nil {
