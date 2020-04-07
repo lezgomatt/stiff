@@ -79,6 +79,7 @@ type RouteConfig struct {
 	Headers map[string]string `json:"headers"`
 	ETag    *bool             `json:"etag"`
 	LastMod *bool             `json:"lastmod"`
+	Serve   string            `json:"serve"`
 }
 
 var yes = true
@@ -119,6 +120,10 @@ func NewRouteConfig(sc *ServerConfig, rc *RouteConfig) RouteConfig {
 
 	if rc.LastMod != nil {
 		nc.LastMod = rc.LastMod
+	}
+
+	if rc.Serve != "" {
+		nc.Serve = path.Clean("/" + rc.Serve)
 	}
 
 	return nc
@@ -329,7 +334,9 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var p string
-	if url == "/" {
+	if rc.Serve != "" {
+		p = rc.Serve
+	} else if url == "/" {
 		p = indexPath
 	} else {
 		p = filepath.FromSlash(url)
