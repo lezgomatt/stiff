@@ -10,6 +10,8 @@ import (
 	"strings"
 )
 
+const HashLength = 16
+
 type FileMap map[string]FileDetails
 
 type FileDetails struct {
@@ -83,5 +85,5 @@ func computeETag(path string, mType string) (string, error) {
 	checksum := base64.URLEncoding.EncodeToString(h.Sum(nil))
 
 	// use weak etags to allow the same hash for compressed versions
-	return fmt.Sprintf(`W/"%s"`, checksum[:20]), nil
+	return fmt.Sprintf(`W/"%s"`, checksum[:HashLength]), nil
 }
