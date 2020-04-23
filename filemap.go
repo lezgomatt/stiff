@@ -12,7 +12,10 @@ import (
 
 const HashLength = 16
 
-type FileMap map[string]FileDetails
+type FileMap struct {
+	files      map[string]FileDetails
+	errorPages map[string]FileDetails
+}
 
 type FileDetails struct {
 	MimeType  string
@@ -22,7 +25,7 @@ type FileDetails struct {
 }
 
 func BuildFileMap(config *ServerConfig, dir string, rm RouteMap, mm MimeMap) (FileMap, error) {
-	fileMap := make(map[string]FileDetails)
+	files := make(map[string]FileDetails)
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -35,15 +38,15 @@ func BuildFileMap(config *ServerConfig, dir string, rm RouteMap, mm MimeMap) (Fi
 		p := strings.TrimPrefix(path, PublicDir)
 		if strings.HasSuffix(p, ".br") {
 			p = strings.TrimSuffix(p, ".br")
-			if fd, ok := fileMap[p]; ok {
+			if fd, found := files[p]; found {
 				fd.HasBrotli = true
-				fileMap[p] = fd
+				files[p] = fd
 			}
 		} else if strings.HasSuffix(path, ".gz") {
 			p = strings.TrimSuffix(p, ".gz")
-			if fd, ok := fileMap[p]; ok {
+			if fd, found := files[p]; found {
 				fd.HasGZip = true
-				fileMap[p] = fd
+				files[p] = fd
 			}
 		} else {
 			mType := mm.FindType(filepath.Ext(p))
@@ -56,17 +59,27 @@ func BuildFileMap(config *ServerConfig, dir string, rm RouteMap, mm MimeMap) (Fi
 				}
 			}
 
-			fileMap[p] = FileDetails{ETag: eTag, MimeType: mType}
+			files[p] = FileDetails{ETag: eTag, MimeType: mType}
 		}
 
 		return nil
 	})
 
 	if err != nil {
-		return nil, err
+		return FileMap{}, err
 	}
 
-	return fileMap, nil
+	errorPages := make(map[string]FileDetails)
+	errorPaths := []string{"/404.html", "/500.html"}
+
+	for _, p := range errorPaths {
+		if fd, found := files[p]; found {
+			errorPages[p] = fd
+			delete(files, p)
+		}
+	}
+
+	return FileMap{files: files, errorPages: errorPages}, nil
 }
 
 func computeETag(path string, mType string) (string, error) {

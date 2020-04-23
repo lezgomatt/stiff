@@ -76,17 +76,14 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var fileDetails FileDetails
 
-	if fd, found := s.fileMap[p]; !found {
-		fd, found := s.fileMap[p+".html"]
-		if !found {
-			s.send404(w, r)
-			return
-		}
-
+	if fd, found := s.fileMap.files[p]; found {
+		fileDetails = fd
+	} else if fd, found := s.fileMap.files[p+".html"]; found {
 		p += ".html"
 		fileDetails = fd
 	} else {
-		fileDetails = fd
+		s.send404(w, r)
+		return
 	}
 
 	if p == indexPath && url != "/" {
@@ -163,7 +160,7 @@ func (s *FileServer) send404(w http.ResponseWriter, r *http.Request) {
 	w.Header().Del("ETag")
 	w.Header().Del("Last-Modified")
 
-	err := s.sendHTML(w, r, "/404.html", http.StatusNotFound)
+	err := s.sendErrorPage(w, r, "/404.html", http.StatusNotFound)
 	if err != nil {
 		http.Error(w, "404 page not found", http.StatusNotFound)
 	}
@@ -175,17 +172,17 @@ func (s *FileServer) send500(w http.ResponseWriter, r *http.Request) {
 	w.Header().Del("ETag")
 	w.Header().Del("Last-Modified")
 
-	err := s.sendHTML(w, r, "/500.html", http.StatusInternalServerError)
+	err := s.sendErrorPage(w, r, "/500.html", http.StatusInternalServerError)
 	if err != nil {
 		http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
 	}
 }
 
-func (s *FileServer) sendHTML(w http.ResponseWriter, r *http.Request, htmlPath string, statusCode int) error {
-	p := filepath.FromSlash(htmlPath)
-	fd, found := s.fileMap[p]
+func (s *FileServer) sendErrorPage(w http.ResponseWriter, r *http.Request, errorPath string, statusCode int) error {
+	p := filepath.FromSlash(errorPath)
+	fd, found := s.fileMap.errorPages[p]
 	if !found {
-		return fmt.Errorf("fileserver: file not found %q", htmlPath)
+		return fmt.Errorf("fileserver: file not found %q", errorPath)
 	}
 
 	file, err := os.Open(filepath.Join(PublicDir, p))
@@ -200,7 +197,7 @@ func (s *FileServer) sendHTML(w http.ResponseWriter, r *http.Request, htmlPath s
 	}
 
 	if fileInfo.IsDir() {
-		return fmt.Errorf("fileserver: expected HTML file %q, found a directory instead", htmlPath)
+		return fmt.Errorf("fileserver: expected HTML file %q, found a directory instead", errorPath)
 	}
 
 	size := fileInfo.Size()
