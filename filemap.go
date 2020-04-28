@@ -21,7 +21,7 @@ type FileDetails struct {
 	MimeType  string
 	ETag      string
 	HasBrotli bool
-	HasGZip   bool
+	HasGzip   bool
 }
 
 func BuildFileMap(config *ServerConfig, dir string, rm RouteMap, mm MimeMap) (FileMap, error) {
@@ -45,7 +45,7 @@ func BuildFileMap(config *ServerConfig, dir string, rm RouteMap, mm MimeMap) (Fi
 		} else if strings.HasSuffix(path, ".gz") {
 			p = strings.TrimSuffix(p, ".gz")
 			if fd, found := files[p]; found {
-				fd.HasGZip = true
+				fd.HasGzip = true
 				files[p] = fd
 			}
 		} else {

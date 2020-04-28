@@ -93,14 +93,14 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	targetPath := filepath.Join(PublicDir, p)
 	rangeReq := r.Header.Get("Range")
-	if fileDetails.HasBrotli || fileDetails.HasGZip {
+	if fileDetails.HasBrotli || fileDetails.HasGzip {
 		w.Header().Add("Vary", "Accept-Encoding")
 
 		ae := parseAcceptEncoding(r.Header.Get("Accept-Encoding"))
 		if ae.Brotli && rangeReq == "" && fileDetails.HasBrotli {
 			w.Header().Set("Content-Encoding", "br")
 			targetPath += ".br"
-		} else if ae.GZip && rangeReq == "" && fileDetails.HasGZip {
+		} else if ae.Gzip && rangeReq == "" && fileDetails.HasGzip {
 			w.Header().Set("Content-Encoding", "gzip")
 			targetPath += ".gz"
 		}

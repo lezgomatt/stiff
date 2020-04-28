@@ -4,7 +4,7 @@ import "strings"
 
 type AcceptEncoding struct {
 	Brotli bool
-	GZip   bool
+	Gzip   bool
 }
 
 func parseAcceptEncoding(headerText string) AcceptEncoding {
@@ -23,7 +23,7 @@ func parseAcceptEncoding(headerText string) AcceptEncoding {
 		case "br":
 			ae.Brotli = true
 		case "gzip":
-			ae.GZip = true
+			ae.Gzip = true
 		}
 	}
 
