@@ -32,7 +32,9 @@ func NewRouteConfig(sc *ServerConfig, rc *RouteConfig) RouteConfig {
 	}
 
 	for k, v := range sc.Headers {
-		nc.Headers[k] = v
+		if v != "" {
+			nc.Headers[k] = v
+		}
 	}
 
 	if sc.ETag != nil {
@@ -48,7 +50,11 @@ func NewRouteConfig(sc *ServerConfig, rc *RouteConfig) RouteConfig {
 	}
 
 	for k, v := range rc.Headers {
-		nc.Headers[k] = v
+		if v == "" {
+			delete(nc.Headers, k)
+		} else {
+			nc.Headers[k] = v
+		}
 	}
 
 	if rc.ETag != nil {

@@ -16,7 +16,7 @@ func NewRouteMap(sc *ServerConfig) (RouteMap, error) {
 	}
 
 	routes := make([]string, 0, len(sc.Routes))
-	for r, _ := range sc.Routes {
+	for r := range sc.Routes {
 		if !strings.HasPrefix(r, "/") {
 			return nil, fmt.Errorf("stiff.json: invalid route %q, missing leading slash", r)
 		}
