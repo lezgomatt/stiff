@@ -20,7 +20,7 @@ stiff is meant to be used behind a reverse proxy, features like HTTPS, access lo
 - Place the files to be served in a directory named `public`
 - Once the server is running, files can no longer be added or modified
 - For precompressed files, the filename must match the original with a `.gz` and `.br` extension
-- To generate the precompressed files, you will have to use a separate tool like [prepa](https://github.com/undecidabot/prepa)
+- To generate the precompressed files, you will have to use a separate tool like [prepa](https://github.com/lezgomatt/prepa)
 
 
 ## Configuration

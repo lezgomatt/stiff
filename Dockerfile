@@ -1,9 +1,9 @@
 FROM golang:1.14-buster AS builder
 
-ENV STIFF_VERSION 1.0.1
+ENV STIFF_VERSION 1.0.2
 
 WORKDIR /go/src
-RUN wget -O stiff-${STIFF_VERSION}.tar.gz https://github.com/undecidabot/stiff/archive/v${STIFF_VERSION}.tar.gz \
+RUN wget -O stiff-${STIFF_VERSION}.tar.gz https://github.com/lezgomatt/stiff/archive/v${STIFF_VERSION}.tar.gz \
   && tar xf stiff-${STIFF_VERSION}.tar.gz \
   && mv stiff-${STIFF_VERSION} stiff
 

@@ -1,3 +1,3 @@
-module github.com/undecidabot/stiff
+module github.com/lezgomatt/stiff
 
 go 1.14
