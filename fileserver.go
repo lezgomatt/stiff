@@ -86,7 +86,7 @@ func (s *FileServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if p == indexPath && url != "/" {
+	if rc.Serve == "" && p == indexPath && url != "/" {
 		http.Redirect(w, r, "/", http.StatusMovedPermanently)
 		return
 	}
