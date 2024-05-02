@@ -18,14 +18,19 @@ stiff is meant to be used behind a reverse proxy, features like HTTPS, access lo
 ## Usage
 
 - Place the files to be served in a directory named `public`
-- Once the server is running, files can no longer be added or modified
+- While the server is running, these files must *not* be modified (including additions)
 - For precompressed files, the filename must match the original with a `.gz` and `.br` extension
 - To generate the precompressed files, you will have to use a separate tool like [prepa](https://github.com/lezgomatt/prepa)
 
 
 ## Configuration
 
-You can configure stiff with a JSON file called `stiff.json`.
+By default, the server will listen on port 1717, but it can be set via the `PORT` environment variable.
+
+You can configure stiff with a JSON file called `stiff.json` (at the root, not inside the `public` directory).
+
+Error pages can be customized by providing a `404.html ` and `500.html` file in the `public` directory.
+
 
 ### Top-Level Options
 
